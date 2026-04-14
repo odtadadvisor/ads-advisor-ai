@@ -633,23 +633,20 @@ function findAnswer(question) {
 
   for (const item of knowledgeBase) {
     let score = 0;
-    for (const kw of item.keywords) { if (q.includes(normalize(kw))) score += kw.length * 3; }
-    if (item.synonyms) { for (const syn of item.synonyms) { if (q.includes(normalize(syn))) score += syn.length * 2; } }
+    // Only count direct keyword matches (strict mode)
     for (const kw of item.keywords) {
-      const nkw = normalize(kw); if (nkw.length < 2) continue;
-      let overlap = 0; for (const ch of nkw) { if (q.includes(ch)) overlap++; }
-      if (overlap / nkw.length >= 0.7) score += Math.floor(overlap / nkw.length * nkw.length);
+      const nkw = normalize(kw);
+      if (nkw.length >= 3 && q.includes(nkw)) score += nkw.length * 3;
     }
-    const ansNorm = normalize(currentLang === 'zh' ? item.answer_zh : item.answer_en).substring(0, 200);
-    for (const w of extractWords(q)) { if (w.length >= 2 && ansNorm.includes(w)) score++; }
     if (score > bestScore) { bestScore = score; bestMatch = item; }
   }
 
-  const threshold = Math.max(3, Math.floor(q.length * 0.3));
-  const answer = bestMatch ? (currentLang === 'zh' ? bestMatch.answer_zh : bestMatch.answer_en) : '';
-
-  if (bestMatch && bestScore >= threshold) return { found: true, answer };
-  if (bestMatch && bestScore >= 2) return { found: true, answer: answer + T('partialMatch') };
+  // Only use local if strong keyword match (at least one full keyword hit of 3+ chars)
+  if (bestMatch && bestScore >= 9) {
+    const answer = currentLang === 'zh' ? bestMatch.answer_zh : bestMatch.answer_en;
+    return { found: true, answer };
+  }
+  // Everything else goes to DeepSeek
   return { found: false, answer: T('noAnswer') };
 }
 
@@ -664,19 +661,7 @@ function sendMessage() {
   input.value = ''; autoResize(input);
   showTyping();
 
-  // Try local knowledge base first
-  const localResult = findAnswer(text);
-  if (localResult.found) {
-    setTimeout(() => {
-      hideTyping();
-      const aiMsgId = addMessage('ai', localResult.answer);
-      addFeedback(aiMsgId, text, localResult.answer, true);
-      saveToHistory(text, localResult.answer, true);
-    }, 600 + Math.random() * 400);
-    return;
-  }
-
-  // Fall back to DeepSeek AI
+  // Call DeepSeek AI
   fetch('/api/chat', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
